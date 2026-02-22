@@ -1,3 +1,5 @@
+import jax
+
 def convert_qwen3_params_for_linen(src_weights: dict, num_hidden_layers: int):
   params = {
     'Embed_0': {
@@ -42,6 +44,8 @@ def convert_qwen3_params_for_linen(src_weights: dict, num_hidden_layers: int):
     params[f'down_proj_{i}'] = {
       'kernel': src_weights[f'model.layers.{i}.mlp.down_proj.weight'].transpose(1, 0),
     }
+
+  params = jax.tree.map(lambda x: x.astype(jax.numpy.float32), params)
 
   return params
 

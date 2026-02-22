@@ -15,7 +15,6 @@ jax_cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".jax_c
 jax.config.update("jax_compilation_cache_dir", jax_cache_dir)
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-'/home/mat/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-Base/snapshots/da87bfb608c14b7cf20ba1ce41287e8de496c0cd'
 
 # Model setup
 
@@ -25,6 +24,8 @@ snapshot_dir = snapshot_download(model_id)
 tokenizer = PreTrainedTokenizerFast.from_pretrained(model_id)
 
 cfg = json.loads((Path(snapshot_dir) / "config.json").read_text())
+
+print("Loading weights...")
 
 src_weights = dict()
 with safe_open(Path(snapshot_dir) / "model.safetensors", framework="flax") as f:
@@ -46,8 +47,8 @@ model = Qwen3Model(
   rope_theta=cfg['rope_theta'],
 )
 
-# @jax.jit
-def forward(tokens: jax.Array):
+@jax.jit
+def forward(vars: dict, tokens: jax.Array):
   return model.apply(vars, tokens)
 
 # Generate text in a loop
@@ -56,13 +57,18 @@ text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'The quick brown'
 
 tokens = j.array(tokenizer(text)['input_ids'])
 
-print(text)
-for i in range(10):
-  logits = forward(tokens)
+max_len = 50
+
+print(text, end="")
+while len(tokens) < max_len:
+  input = j.pad(tokens, (max_len - len(tokens), 0), constant_values=tokenizer.pad_token_id)
+  logits = forward(vars, input)
 
   next_token = logits[-1].argmax().item()
   next_text = tokenizer.decode(next_token)
 
   text += next_text
   tokens = j.concat([tokens, j.array([next_token])])
-  print(next_text)
+  print(next_text, end="")
+
+print("")
