@@ -1,7 +1,7 @@
 [project]
 name = "flax-qwen3"
 version = "0.1.0"
-description = "Add your description here"
+description = "Qwen3 model written using Flax Linen"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
