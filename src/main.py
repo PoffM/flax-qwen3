@@ -39,6 +39,7 @@ vars = {
 model = Qwen3Model(
   vocab_size=cfg["vocab_size"],
   hidden_size=cfg["hidden_size"],
+  intermediate_size=cfg["intermediate_size"],
   rms_norm_eps=cfg["rms_norm_eps"],
   num_hidden_layers=cfg["num_hidden_layers"],
   num_attention_heads=cfg['num_attention_heads'],

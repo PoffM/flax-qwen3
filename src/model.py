@@ -5,6 +5,7 @@ import flax.linen as nn
 class Qwen3Model(nn.Module):
   vocab_size: int
   hidden_size: int
+  intermediate_size: int
   rms_norm_eps: float
   num_hidden_layers: int
   num_attention_heads: int
@@ -22,7 +23,7 @@ class Qwen3Model(nn.Module):
     for i in range(self.num_hidden_layers):
       # input norm
       x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"input_layernorm_{i}")(x)
-      
+
       # qkv projection
       q = nn.Dense(self.num_attention_heads * self.head_dim, use_bias=False, name=f"q_proj_{i}")(x_norm)
       q = q.reshape(-1, self.num_attention_heads, self.head_dim)
@@ -41,7 +42,7 @@ class Qwen3Model(nn.Module):
       q = rope(q, self.rope_theta, pos)
       k = rope(k, self.rope_theta, pos)
 
-      # attention
+      # grouped query attention
       attn_mask = j.tri(T, dtype=bool)
       attn_out = jax.nn.dot_product_attention(q, k, v, mask=attn_mask)
       attn_out = attn_out.reshape(T, -1)
@@ -54,9 +55,13 @@ class Qwen3Model(nn.Module):
       x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"post_attention_layernorm_{i}")(x)
       
       # MLP
-      gate = jax.nn.silu(nn.Dense(3 * self.hidden_size, use_bias=False, name=f"gate_proj_{i}")(x_norm))
-      up = nn.Dense(3 * self.hidden_size, use_bias=False, name=f"up_proj_{i}")(x_norm)
-      x += nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gate * up)
+      gate = nn.Dense(self.intermediate_size, use_bias=False, name=f"gate_proj_{i}")(x_norm)
+      gate = jax.nn.silu(gate)
+      up = nn.Dense(self.intermediate_size, use_bias=False, name=f"up_proj_{i}")(x_norm)
+      down = nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gate * up)
+
+      # add to residual
+      x += down
 
     # logits
     x = nn.RMSNorm(self.rms_norm_eps, name='norm')(x)
@@ -66,10 +71,11 @@ class Qwen3Model(nn.Module):
 
 def rope(x, theta, pos=0):
     T, N, H = x.shape
-    positions = pos + j.broadcast_to(j.arange(T), [T])
-    freq = 1.0 / (theta ** (j.arange(0, H, 2, dtype=j.float32) / H))
-    inp = j.einsum('t,h->th', positions, freq, precision=jax.lax.Precision.HIGHEST)
-    sin, cos = j.sin(inp).astype(x.dtype), j.cos(inp).astype(x.dtype)
-    x1, x2 = x[:, :, :H//2], x[:, :, H//2:]
-    sin, cos = sin[:, None, :], cos[:, None, :] # [B, T, 1, H/2]
-    return j.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1)
+    positions = pos + j.arange(T) # (T)
+    freq = 1.0 / (theta ** (j.arange(0, H, 2) / H)) # (H/2)
+    angles = positions[:, None] * freq # (T, H/2)
+    sin = j.sin(angles)[:, None, :] # (T, 1, H/2)
+    cos = j.cos(angles)[:, None, :] # (T, 1, H/2)
+    x1, x2 = j.split(x, 2, axis=-1) # 2x (T, N, H/2)
+    rotated = j.concat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1) # (T, N, H)
+    return rotated
