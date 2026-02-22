@@ -1,10 +1,10 @@
 Qwen3 model written using Flax Linen as a learning exercise.
 
-# Init repo
+## Init repo
 
 `uv sync`
 
-# Run
+## Run
 
 Pass the text as arguments, and the model continues it.
 
