@@ -3,15 +3,32 @@ import jax.numpy as j
 import flax.linen as nn
 
 class Qwen3Model(nn.Module):
-  vocab_size: int
-  hidden_size: int
-  intermediate_size: int
-  rms_norm_eps: float
-  num_hidden_layers: int
-  num_attention_heads: int
-  num_key_value_heads: int
+  architectures: list[str]
+  attention_bias: bool
+  attention_dropout: float
+  bos_token_id: int
+  eos_token_id: int
   head_dim: int
-  rope_theta: float
+  hidden_act: str
+  hidden_size: int
+  initializer_range: float
+  intermediate_size: int
+  max_position_embeddings: int
+  max_window_layers: int
+  model_type: str
+  num_attention_heads: int
+  num_hidden_layers: int
+  num_key_value_heads: int
+  rms_norm_eps: float
+  rope_scaling: any
+  rope_theta: int
+  sliding_window: any
+  tie_word_embeddings: bool
+  torch_dtype: str
+  transformers_version: str
+  use_cache: bool
+  use_sliding_window: bool
+  vocab_size: int
 
   @nn.compact
   def __call__(self, x: jax.Array, pos=0):
