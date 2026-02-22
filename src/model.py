@@ -20,19 +20,17 @@ class Qwen3Model(nn.Module):
     T, C = x.shape
 
     for i in range(self.num_hidden_layers):
-      lx = x
-
       # input norm
-      lx_norm = nn.RMSNorm(self.rms_norm_eps, name=f"input_layernorm_{i}")(lx)
+      x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"input_layernorm_{i}")(x)
       
       # qkv projection
-      q = nn.Dense(self.num_attention_heads * self.head_dim, use_bias=False, name=f"q_proj_{i}")(lx_norm)
+      q = nn.Dense(self.num_attention_heads * self.head_dim, use_bias=False, name=f"q_proj_{i}")(x_norm)
       q = q.reshape(-1, self.num_attention_heads, self.head_dim)
 
-      k = nn.Dense(self.num_key_value_heads * self.head_dim, use_bias=False, name=f"k_proj_{i}")(lx_norm)
+      k = nn.Dense(self.num_key_value_heads * self.head_dim, use_bias=False, name=f"k_proj_{i}")(x_norm)
       k = k.reshape(-1, self.num_key_value_heads, self.head_dim)
 
-      v = nn.Dense(self.num_key_value_heads * self.head_dim, use_bias=False, name=f"v_proj_{i}")(lx_norm)
+      v = nn.Dense(self.num_key_value_heads * self.head_dim, use_bias=False, name=f"v_proj_{i}")(x_norm)
       v = v.reshape(-1, self.num_key_value_heads, self.head_dim)
 
       # QK norm
@@ -50,17 +48,15 @@ class Qwen3Model(nn.Module):
 
       # out projection
       o = nn.Dense(self.hidden_size, use_bias=False, name=f"o_proj_{i}")(attn_out)
-      lx += o
+      x += o
 
       # post-attention norm
-      lx_norm = nn.RMSNorm(self.rms_norm_eps, name=f"post_attention_layernorm_{i}")(lx)
+      x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"post_attention_layernorm_{i}")(x)
       
       # MLP
-      gate = jax.nn.silu(nn.Dense(3 * self.hidden_size, use_bias=False, name=f"gate_proj_{i}")(lx_norm))
-      up = nn.Dense(3 * self.hidden_size, use_bias=False, name=f"up_proj_{i}")(lx_norm)
-      lx += nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gate * up)
-
-      x = lx
+      gate = jax.nn.silu(nn.Dense(3 * self.hidden_size, use_bias=False, name=f"gate_proj_{i}")(x_norm))
+      up = nn.Dense(3 * self.hidden_size, use_bias=False, name=f"up_proj_{i}")(x_norm)
+      x += nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gate * up)
 
     # logits
     x = nn.RMSNorm(self.rms_norm_eps, name='norm')(x)
