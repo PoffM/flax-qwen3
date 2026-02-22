@@ -59,7 +59,7 @@ tokens = j.array(tokenizer(text)['input_ids'])
 
 max_len = 50
 
-print(text, end="")
+print(text, end="", flush=True)
 while len(tokens) < max_len:
   input = j.pad(tokens, (max_len - len(tokens), 0), constant_values=tokenizer.pad_token_id)
   logits = forward(vars, input)
@@ -69,6 +69,6 @@ while len(tokens) < max_len:
 
   text += next_text
   tokens = j.concat([tokens, j.array([next_token])])
-  print(next_text, end="")
+  print(next_text, end="", flush=True)
 
 print("")
