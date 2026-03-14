@@ -59,9 +59,9 @@ class Qwen3Model(nn.Module):
       q = rope(q, self.rope_theta, pos)
       k = rope(k, self.rope_theta, pos)
 
+      # KV cache
       if self.use_cache:
         kv_cache = { **kv_cache, i: j.concat([kv_cache[i][:, T:], j.stack([k, v])], axis=1) }
-        # kv_cache = { **kv_cache, i: jax.lax.dynamic_update_slice(kv_cache[i], j.stack([k, v]), (0, pos, 0, 0)) }
         k, v = kv_cache[i]
 
       # grouped query attention
@@ -70,20 +70,21 @@ class Qwen3Model(nn.Module):
       attn_out = attn_out.reshape(T, -1)
 
       # out projection
-      o = nn.Dense(self.hidden_size, use_bias=False, name=f"o_proj_{i}")(attn_out)
-      x += o
+      attn_out_proj = nn.Dense(self.hidden_size, use_bias=False, name=f"o_proj_{i}")(attn_out)
+      x += attn_out_proj
 
       # post-attention norm
       x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"post_attention_layernorm_{i}")(x)
       
-      # MLP
+      # Gated MLP
       gate = nn.Dense(self.intermediate_size, use_bias=False, name=f"gate_proj_{i}")(x_norm)
       gate = jax.nn.silu(gate)
-      up = nn.Dense(self.intermediate_size, use_bias=False, name=f"up_proj_{i}")(x_norm)
-      down = nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gate * up)
+      value = nn.Dense(self.intermediate_size, use_bias=False, name=f"up_proj_{i}")(x_norm)
+      gated_value = gate * value
+      gate_out = nn.Dense(self.hidden_size, use_bias=False, name=f"down_proj_{i}")(gated_value)
 
       # add to residual
-      x += down
+      x += gate_out
 
     # logits
     x = nn.RMSNorm(self.rms_norm_eps, name='norm')(x)
@@ -91,7 +92,7 @@ class Qwen3Model(nn.Module):
 
     return logits, kv_cache
 
-def rope(x, theta, pos=0):
+def rope(x: jax.Array, theta, pos=0):
     T, N, H = x.shape
     positions = pos + j.arange(T) # (T)
     freq = 1.0 / (theta ** (j.arange(0, H, 2) / H)) # (H/2)
