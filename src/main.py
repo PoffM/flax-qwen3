@@ -10,13 +10,14 @@ from model import Qwen3Model
 from convert_weights import convert_qwen3_params_for_linen
 import sys
 
-# Jax cache
+### Jax cache setup
+
 jax_cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".jax_cache")
 jax.config.update("jax_compilation_cache_dir", jax_cache_dir)
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
-# Model setup
+### Model setup
 
 model_id = "Qwen/Qwen3-0.6B-Base"
 snapshot_dir = snapshot_download(model_id)
@@ -24,6 +25,7 @@ snapshot_dir = snapshot_download(model_id)
 tokenizer = PreTrainedTokenizerFast.from_pretrained(model_id)
 
 cfg = json.loads((Path(snapshot_dir) / "config.json").read_text())
+cfg["max_position_embeddings"] = 50
 
 print("Loading weights...")
 
@@ -39,27 +41,45 @@ vars = {
 model = Qwen3Model(**cfg)
 
 @jax.jit
-def forward(vars: dict, tokens: jax.Array):
-  return model.apply(vars, tokens)
+def forward(vars: dict, tokens: jax.Array, pos=0, kv_cache: dict[int, jax.Array] = None):
+  return model.apply(vars, tokens, pos, kv_cache)
 
-# Generate text in a loop
+ctx_len = cfg["max_position_embeddings"]
 
 text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'The quick brown'
 
-tokens = j.array(tokenizer(text)['input_ids'])
-
-max_len = 50
+# Init kv cache
+kv_cache: dict[int, jax.Array] = dict()
+for i in range(cfg["num_hidden_layers"]):
+  kv_cache[i] = j.zeros((2, ctx_len, cfg['num_key_value_heads'], cfg['head_dim']), dtype=j.float32)
 
 print(text, end="", flush=True)
-while len(tokens) < max_len:
-  input = j.pad(tokens, (max_len - len(tokens), 0), constant_values=tokenizer.pad_token_id)
-  logits = forward(vars, input)
 
-  next_token = logits[-1].argmax().item()
-  next_text = tokenizer.decode(next_token)
+### Do an initial 'prefill' inference to populate the kv cache with the initial tokens' keys and values.
 
+tokens = j.array(tokenizer(text)['input_ids'])
+input = j.pad(tokens, (ctx_len - len(tokens), 0), constant_values=tokenizer.pad_token_id)
+# The padding tokens get negative positions, and the real input tokens start at 0.
+pos = len(tokens) - ctx_len
+logits, kv_cache = forward(vars, input, pos, kv_cache)
+pos = len(tokens)
+
+predicted_token = logits[-1].argmax().item()
+next_text = tokenizer.decode(predicted_token)
+text += next_text
+print(next_text, end="", flush=True)
+
+### Predict the next token in a loop, only passing the last predicted token.
+
+while pos < ctx_len:
+  input = j.array([predicted_token])
+  logits, kv_cache = forward(vars, input, pos, kv_cache)
+
+  predicted_token = logits[-1].argmax().item()
+  next_text = tokenizer.decode(predicted_token)
   text += next_text
-  tokens = j.concat([tokens, j.array([next_token])])
   print(next_text, end="", flush=True)
+
+  pos += 1
 
 print("")

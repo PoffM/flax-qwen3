@@ -31,7 +31,7 @@ class Qwen3Model(nn.Module):
   vocab_size: int
 
   @nn.compact
-  def __call__(self, x: jax.Array, pos=0):
+  def __call__(self, x: jax.Array, pos=0, kv_cache: dict[int, jax.Array] = None):
     embeddings = nn.Embed(self.vocab_size, self.hidden_size)
     x = embeddings(x)
 
@@ -59,8 +59,13 @@ class Qwen3Model(nn.Module):
       q = rope(q, self.rope_theta, pos)
       k = rope(k, self.rope_theta, pos)
 
+      if self.use_cache:
+        kv_cache = { **kv_cache, i: j.concat([kv_cache[i][:, T:], j.stack([k, v])], axis=1) }
+        # kv_cache = { **kv_cache, i: jax.lax.dynamic_update_slice(kv_cache[i], j.stack([k, v]), (0, pos, 0, 0)) }
+        k, v = kv_cache[i]
+
       # grouped query attention
-      attn_mask = j.tri(T, dtype=bool)
+      attn_mask = j.tri(self.max_position_embeddings, dtype=bool)[-T:]
       attn_out = jax.nn.dot_product_attention(q, k, v, mask=attn_mask)
       attn_out = attn_out.reshape(T, -1)
 
@@ -84,7 +89,7 @@ class Qwen3Model(nn.Module):
     x = nn.RMSNorm(self.rms_norm_eps, name='norm')(x)
     logits = embeddings.attend(x)
 
-    return logits
+    return logits, kv_cache
 
 def rope(x, theta, pos=0):
     T, N, H = x.shape
