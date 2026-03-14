@@ -9,6 +9,7 @@ from pathlib import Path
 from model import Qwen3Model
 from convert_weights import convert_qwen3_params_for_linen
 import sys
+import random
 
 ### Jax cache setup
 
@@ -55,31 +56,23 @@ for i in range(cfg["num_hidden_layers"]):
 
 print(text, end="", flush=True)
 
-### Do an initial 'prefill' inference to populate the kv cache with the initial tokens' keys and values.
+### The first inference passes all existing tokens, then the loop only passes the last predicted token.
 
 tokens = j.array(tokenizer(text)['input_ids'])
 input = j.pad(tokens, (ctx_len - len(tokens), 0), constant_values=tokenizer.pad_token_id)
 # The padding tokens get negative positions, and the real input tokens start at 0.
 pos = len(tokens) - ctx_len
-logits, kv_cache = forward(vars, input, pos, kv_cache)
-pos = len(tokens)
 
-predicted_token = logits[-1].argmax().item()
-next_text = tokenizer.decode(predicted_token)
-text += next_text
-print(next_text, end="", flush=True)
-
-### Predict the next token in a loop, only passing the last predicted token.
+rng = jax.random.key(random.randint(0, 2**32 - 1))
 
 while pos < ctx_len:
-  input = j.array([predicted_token])
   logits, kv_cache = forward(vars, input, pos, kv_cache)
-
   predicted_token = logits[-1].argmax().item()
   next_text = tokenizer.decode(predicted_token)
   text += next_text
   print(next_text, end="", flush=True)
 
-  pos += 1
+  pos += len(input)
+  input = j.array([predicted_token])
 
 print("")
