@@ -26,7 +26,7 @@ snapshot_dir = snapshot_download(model_id)
 tokenizer = PreTrainedTokenizerFast.from_pretrained(model_id)
 
 cfg = json.loads((Path(snapshot_dir) / "config.json").read_text())
-cfg["max_position_embeddings"] = 50
+cfg["max_position_embeddings"] = 64
 
 print("Loading weights...")
 
@@ -47,12 +47,12 @@ def forward(vars: dict, tokens: jax.Array, pos=0, kv_cache: dict[int, jax.Array]
 
 ctx_len = cfg["max_position_embeddings"]
 
-text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'The quick brown'
+text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'the quick brown fox'
 
 # Init kv cache
 kv_cache: dict[int, jax.Array] = dict()
 for i in range(cfg["num_hidden_layers"]):
-  kv_cache[i] = j.zeros((2, ctx_len, cfg['num_key_value_heads'], cfg['head_dim']), dtype=j.float32)
+  kv_cache[i] = j.zeros((2, ctx_len, cfg['num_key_value_heads'], cfg['head_dim']), dtype=j.bfloat16)
 
 print(text, end="", flush=True)
 

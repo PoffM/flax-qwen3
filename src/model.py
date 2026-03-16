@@ -37,6 +37,21 @@ class Qwen3Model(nn.Module):
 
     T, C = x.shape
 
+    # Mask out the leading padding tokens,
+    # so actual word tokens only attend to each other.
+    # Negative positions are for padding tokens.
+    # Example for 2 padding + 3 word tokens:
+    #   0 0 0 0 0
+    #   0 0 0 0 0
+    #   0 0 1 1 1
+    #   0 0 0 1 1
+    #   0 0 0 0 1
+    start_pos = pos + T - self.max_position_embeddings
+    pos_range = j.arange(self.max_position_embeddings) + start_pos
+    q, k = j.meshgrid(pos_range, pos_range)
+    attn_mask = (k>=q) & (q>=0)
+    attn_mask = attn_mask[-T:]
+
     for i in range(self.num_hidden_layers):
       # input norm
       x_norm = nn.RMSNorm(self.rms_norm_eps, name=f"input_layernorm_{i}")(x)
@@ -65,8 +80,14 @@ class Qwen3Model(nn.Module):
         k, v = kv_cache[i]
 
       # grouped query attention
-      attn_mask = j.tri(self.max_position_embeddings, dtype=bool)[-T:]
-      attn_out = jax.nn.dot_product_attention(q, k, v, mask=attn_mask)
+      attn_out = jax.nn.dot_product_attention(
+        # Convert args to float32 to avoid this error when running on my 1070:
+        # UNIMPLEMENTED: Unsupported algorithm on the current device(s): ALG_DOT_BF16_BF16_F32
+        q.astype(j.float32),
+        k.astype(j.float32),
+        v.astype(j.float32),
+        mask=attn_mask
+      ).astype(j.bfloat16)
       attn_out = attn_out.reshape(T, -1)
 
       # out projection
@@ -94,8 +115,9 @@ class Qwen3Model(nn.Module):
 
 def rope(x: jax.Array, theta, pos=0):
     T, N, H = x.shape
-    positions = pos + j.arange(T) # (T)
-    freq = 1.0 / (theta ** (j.arange(0, H, 2) / H)) # (H/2)
+    positions = pos + j.arange(T, dtype=j.bfloat16) # (T)
+    positions = j.maximum(positions, 0) # clamp positions to >= 0
+    freq = 1.0 / (theta ** (j.arange(0, H, 2, dtype=j.bfloat16) / H)) # (H/2)
     angles = positions[:, None] * freq # (T, H/2)
     sin = j.sin(angles)[:, None, :] # (T, 1, H/2)
     cos = j.cos(angles)[:, None, :] # (T, 1, H/2)
