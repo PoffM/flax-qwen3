@@ -31,7 +31,7 @@ class Qwen3Model(nn.Module):
   vocab_size: int
 
   @nn.compact
-  def __call__(self, x: jax.Array, pos=0, kv_cache: dict[int, jax.Array] = None):
+  def __call__(self, x: jax.Array, pos=0, kv_cache: jax.Array = None):
     embeddings = nn.Embed(self.vocab_size, self.hidden_size)
     x = embeddings(x)
 
@@ -40,7 +40,7 @@ class Qwen3Model(nn.Module):
     # Mask out the leading padding tokens,
     # so actual word tokens only attend to each other.
     # Negative positions are for padding tokens.
-    # Example for 2 padding + 3 word tokens:
+    # Example when pos=-2 and we have 2 padding + 3 word tokens:
     #   0 0 0 0 0
     #   0 0 0 0 0
     #   0 0 1 1 1
@@ -51,6 +51,8 @@ class Qwen3Model(nn.Module):
     q, k = j.meshgrid(pos_range, pos_range)
     attn_mask = (k>=q) & (q>=0)
     attn_mask = attn_mask[-T:]
+
+    new_kv_cache = j.zeros((self.num_hidden_layers, 2, T, self.num_key_value_heads, self.head_dim), dtype=j.bfloat16)
 
     for i in range(self.num_hidden_layers):
       # input norm
@@ -76,8 +78,9 @@ class Qwen3Model(nn.Module):
 
       # KV cache
       if self.use_cache:
-        kv_cache = { **kv_cache, i: j.concat([kv_cache[i][:, T:], j.stack([k, v])], axis=1) }
-        k, v = kv_cache[i]
+        cache_read = kv_cache[i, :, T:]
+        new_kv_cache = new_kv_cache.at[i].set(j.stack([k, v]))
+        k, v = j.concat([cache_read, new_kv_cache[i]], axis=1)
 
       # grouped query attention
       attn_out = jax.nn.dot_product_attention(
@@ -111,7 +114,7 @@ class Qwen3Model(nn.Module):
     x = nn.RMSNorm(self.rms_norm_eps, name='norm')(x)
     logits = embeddings.attend(x)
 
-    return logits, kv_cache
+    return logits, new_kv_cache
 
 def rope(x: jax.Array, theta, pos=0):
     T, N, H = x.shape

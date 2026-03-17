@@ -50,9 +50,7 @@ ctx_len = cfg["max_position_embeddings"]
 text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else 'the quick brown fox'
 
 # Init kv cache
-kv_cache: dict[int, jax.Array] = dict()
-for i in range(cfg["num_hidden_layers"]):
-  kv_cache[i] = j.zeros((2, ctx_len, cfg['num_key_value_heads'], cfg['head_dim']), dtype=j.bfloat16)
+kv_cache = j.zeros((cfg['num_hidden_layers'], 2, ctx_len, cfg['num_key_value_heads'], cfg['head_dim']), dtype=j.bfloat16)
 
 print(text, end="", flush=True)
 
@@ -66,7 +64,8 @@ pos = len(tokens) - ctx_len
 rng = jax.random.key(random.randint(0, 2**32 - 1))
 
 while pos < ctx_len:
-  logits, kv_cache = forward(vars, input, pos, kv_cache)
+  logits, new_kv_cache = forward(vars, input, pos, kv_cache)
+  kv_cache = j.concat([kv_cache, new_kv_cache], axis=2)[:, :, -ctx_len:]
   predicted_token = logits[-1].argmax().item()
   next_text = tokenizer.decode(predicted_token)
   text += next_text
