@@ -46,10 +46,9 @@ class Qwen3Model(nn.Module):
     #   0 0 1 1 1
     #   0 0 0 1 1
     #   0 0 0 0 1
-    start_pos = pos + T - self.max_position_embeddings
-    pos_range = j.arange(self.max_position_embeddings) + start_pos
-    q, k = j.meshgrid(pos_range, pos_range)
-    attn_mask = (k>=q) & (q>=0)
+    ctx_start_pos = pos + T - self.max_position_embeddings
+    ctx_positions = j.arange(self.max_position_embeddings) + ctx_start_pos
+    attn_mask = j.where(ctx_positions >= 0, j.tri(self.max_position_embeddings, dtype=j.bool), False)
     attn_mask = attn_mask[-T:]
 
     new_kv_cache = j.zeros((self.num_hidden_layers, 2, T, self.num_key_value_heads, self.head_dim), dtype=j.bfloat16)
