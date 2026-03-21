@@ -118,7 +118,6 @@ class Qwen3Model(nn.Module):
 def rope(x: jax.Array, theta, pos=0):
     T, N, H = x.shape
     positions = pos + j.arange(T, dtype=j.bfloat16) # (T)
-    positions = j.maximum(positions, 0) # clamp positions to >= 0
     freq = 1.0 / (theta ** (j.arange(0, H, 2, dtype=j.bfloat16) / H)) # (H/2)
     angles = positions[:, None] * freq # (T, H/2)
     sin = j.sin(angles)[:, None, :] # (T, 1, H/2)
